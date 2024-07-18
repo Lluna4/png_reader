@@ -44,6 +44,13 @@ unsigned char decode_ubyte(char **src)
     return x;
 }
 
+unsigned char *m_concat(unsigned char *src, unsigned char *concat, size_t size, size_t buffer_size)
+{
+    src = realloc(src, buffer_size + size + 1);
+    memcpy(&src[size], concat, buffer_size);
+    return src;
+}
+
 struct metadata
 {
     int width;
@@ -66,7 +73,7 @@ struct color_alpha
 
 int main()
 {
-    FILE *a = fopen("kk.png", "rb");
+    FILE *a = fopen("k.png", "rb");
     char header[13] = {0};
     char *buffer;
     struct metadata meta = {0};
@@ -80,9 +87,10 @@ int main()
     buffer += 8;
     struct color_alpha *cols = calloc(size, sizeof(struct color_alpha));
     int color_index = 0;
-    unsigned char *data = calloc(size, sizeof(char));
+    unsigned char *data = calloc(10, sizeof(char));
     unsigned char *data_ptr = data;
     int color_lenght = 0;
+    unsigned long total_lenght = 10;
     while (1)
     {
         int lenght = decode_int(&buffer);
@@ -106,12 +114,11 @@ int main()
         else if (startswith(buffer, "IDAT") == 1)
         {
             buffer += 4;
-            unsigned long size2 = size;
-            if (uncompress(data_ptr, &size2, buffer, lenght+4) == Z_OK)
-                printf("OK\n");
+            m_concat(data, (unsigned char *)buffer, total_lenght, lenght);
+            total_lenght += lenght;
             buffer += lenght + 4;
             data_ptr += lenght;
-            printf("Uncompressed %i bytes\n", lenght);
+            
         }
         else if (startswith(buffer, "IEND"))
         {
@@ -125,7 +132,11 @@ int main()
             continue;
         }
     }
-    for (int i = 1; i <= meta.width*meta.height; i++)
+    char *uncompressed = calloc(total_lenght, sizeof(char));
+    unsigned long src_len = total_lenght;
+    uncompress(uncompressed, &total_lenght, data, src_len);
+    printf("Uncompressed %i bytes\n", src_len);
+    /*for (int i = 1; i <= meta.width*meta.height; i++)
     {
         if (meta.color_type == 2 && meta.bit_depth == 8)
         {
@@ -149,6 +160,6 @@ int main()
             if (i%meta.width == 0)
                 printf("\n");
         }
-    }
+        }*/
     return 0;
 }
