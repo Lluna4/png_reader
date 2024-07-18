@@ -2,7 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "lib/user.h"
+#include <zlib.h>
+#include "yet_another_chat/lib/user.h"
 
 int startswith(char *buf, char *str)
 {
@@ -54,20 +55,34 @@ struct metadata
     char interface;
 };
 
+struct color_alpha
+{
+    int r;
+    int g;
+    int b;
+    int alpha;
+};
+
+
 int main()
 {
-    FILE *a = fopen("aaaa.png", "rb");
+    FILE *a = fopen("kk.png", "rb");
     char header[13] = {0};
     char *buffer;
     struct metadata meta = {0};
     fread(header, 4, 2, a);
-    
-    fseek(a, 0, SEEK_END); 
+
+    fseek(a, 0, SEEK_END);
     long size = ftell(a);
-    fseek(a, 0, SEEK_SET); 
+    fseek(a, 0, SEEK_SET);
     buffer = malloc(size + 1);
     fread(buffer, 1, size, a);
     buffer += 8;
+    struct color_alpha *cols = calloc(size, sizeof(struct color_alpha));
+    int color_index = 0;
+    unsigned char *data = calloc(size, sizeof(char));
+    unsigned char *data_ptr = data;
+    int color_lenght = 0;
     while (1)
     {
         int lenght = decode_int(&buffer);
@@ -81,36 +96,58 @@ int main()
             char compression = decode_byte(&buffer);
             char filter = decode_byte(&buffer);
             char interface = decode_byte(&buffer);
-            printf("Image is %ix%i, color type %i, bit depth %i", width, height, color_type, bit_depth);
+            printf("Image is %ix%i, color type %i, bit depth %i\n", width, height, color_type, bit_depth);
             struct metadata aa = {width, height, bit_depth, color_type, compression, filter, interface};
             meta = aa;
-            buffer += 36 + 18;
+            buffer += 4;
             continue;
+            //buffer += 36 + 18;
         }
-        if (startswith(buffer, "IDAT"))
+        else if (startswith(buffer, "IDAT") == 1)
         {
             buffer += 4;
-            for (int i = 0;i < lenght;)
-            {
-                unsigned char r = decode_ubyte(&buffer);
-                unsigned char g = decode_ubyte(&buffer);
-                unsigned char b = decode_ubyte(&buffer);
-                i += 3;
-                struct colors col= {r,g,b};
-                printf("%s", color_string(col, "."));
-                if (i + 3 > lenght)
-                {
-                    buffer += (4 - (i+3 - lenght) - 1);
-                    break;
-                }
-            }
-            buffer += 4;
-            continue;
+            unsigned long size2 = size;
+            if (uncompress(data_ptr, &size2, buffer, lenght+4) == Z_OK)
+                printf("OK\n");
+            buffer += lenght + 4;
+            data_ptr += lenght;
+            printf("Uncompressed %i bytes\n", lenght);
         }
-        if (startswith(buffer, "IEND"))
+        else if (startswith(buffer, "IEND"))
         {
             fclose(a);
             break;
+        }
+        else 
+        {
+            buffer += lenght + 8;
+            printf("advanced %i bytes\n", lenght + 8);
+            continue;
+        }
+    }
+    for (int i = 1; i <= meta.width*meta.height; i++)
+    {
+        if (meta.color_type == 2 && meta.bit_depth == 8)
+        {
+            unsigned char r = decode_ubyte(&data);
+            unsigned char g = decode_ubyte(&data);
+            unsigned char b = decode_ubyte(&data);
+            
+            struct colors col = {r, g, b};
+            printf(" %s ", color_string(col, "."));
+            if (i%meta.width == 0)
+                printf("\n");
+        }
+        if (meta.color_type == 6 && meta.bit_depth == 8)
+        {
+            unsigned char r = decode_ubyte(&data);
+            unsigned char g = decode_ubyte(&data);
+            unsigned char b = decode_ubyte(&data);
+            unsigned char a = decode_ubyte(&data);
+            struct colors col = {r, g, b};
+            printf(" %s ", color_string(col, "."));
+            if (i%meta.width == 0)
+                printf("\n");
         }
     }
     return 0;
