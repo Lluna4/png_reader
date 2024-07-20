@@ -66,9 +66,9 @@ unsigned char **convert_2d(unsigned char *data, struct metadata meta)
 {
     unsigned char **ret = (unsigned char **)calloc(meta.height, sizeof(char *));
     int index = 0;
-    for (int y = 0; y < meta.height- 1;y++)
+    for (int y = 0; y < meta.height;y++)
     {
-        ret[y] = (unsigned char *)calloc((meta.width * 3) + 1, sizeof(char));
+        ret[y] = (unsigned char *)calloc((meta.width * 3) + 2, sizeof(char));
         for (int x = 0; x < (meta.width * 3) + 1; x++)
         {
             ret[y][x] = data[index];
@@ -78,30 +78,30 @@ unsigned char **convert_2d(unsigned char *data, struct metadata meta)
     return ret;
 }
 
-unsigned char *filter_scanline(unsigned char **scanline, int index, int width)
+unsigned char *filter_scanline(unsigned char **scanline, int index, int width, int bpp)
 {
     unsigned char filter = scanline[index][0];
-    unsigned char *unfiltered = calloc(width * 3, sizeof(char));
+    unsigned char *unfiltered = calloc(width * bpp, sizeof(char));
     switch (filter) 
     {
         case 0:
-            for (int x = 1; x < width * 3;x++)
+            for (int x = 1; x < width * bpp;x++)
             {
                 unfiltered[x-1] = scanline[index][x];
             }
             break;
         case 1:
-            for (int x = 1; x < width * 3;x++)
+            for (int x = 1; x < width * bpp;x++)
             {
                 int x_trad = x - 1;
                 if (x <= 3)
                     unfiltered[x_trad] = scanline[index][x];
                 else
-                    unfiltered[x_trad] = scanline[index][x] + unfiltered[x_trad - 3];
+                    unfiltered[x_trad] = scanline[index][x] + unfiltered[x_trad - bpp];
             }
             break;
         case 2:
-            for (int x = 1; x < width * 3;x++)
+            for (int x = 1; x < width * bpp;x++)
             {
                 int x_trad = x - 1;
                 if (index == 0)
@@ -119,7 +119,7 @@ int main()
     unsigned char magic[9] = {137, 80, 78, 71, 13, 10, 26, 10};
     FILE *a = fopen("kk.png", "rb");
     char header[13] = {0};
-    char *buffer;
+    char *buff;
     struct metadata meta = {0};
     fread(header, 4, 2, a);
     if (memcmp(header, magic, 8) != 0)
@@ -131,10 +131,11 @@ int main()
     fseek(a, 0, SEEK_END);
     long size = ftell(a);
     fseek(a, 0, SEEK_SET);
-    buffer = malloc(size + 1);
-    fread(buffer, 1, size, a);
+    buff = malloc(size + 1);
+    fread(buff, 1, size, a);
+    char *buffer = buff;
     unsigned long total_lenght = 0;
-    char *data = calloc(size, sizeof(char));
+    char *data= calloc(size, sizeof(char));
     buffer += 8;
     while (1)
     {
@@ -171,34 +172,44 @@ int main()
         else 
         {
             buffer += lenght + 8;
-            printf("advanced %i bytes\n", lenght + 8);
+            printf("skipped %i bytes\n", lenght + 8);
             continue;
         }
     }
-    unsigned char *uncompressed = malloc((total_lenght + 1) * sizeof(char));
+    total_lenght = total_lenght + 2;
+    unsigned long dest_len = meta.width * meta.height * 4;
+    unsigned char *uncompressed = malloc(dest_len);
     unsigned long src_len = total_lenght;
-    uncompress(uncompressed, &total_lenght, data, src_len);
+    uncompress(uncompressed, &dest_len, (unsigned char *)data, total_lenght);
     unsigned char **img = convert_2d(uncompressed, meta);
     
-    for (int y = 0; y < meta.height- 1;y++)
+    for (int y = 0; y < meta.height;y++)
     {   
-        img[y] = filter_scanline(img, y, meta.width);
+        img[y] = filter_scanline(img, y, meta.width, 3);
     }
     int index = 0;
-    for (int y = 0; y < meta.height- 1;y++)
+    for (int y = 0; y < meta.height;y++)
     {
         for (int x = 0; x < meta.width; x++)
         {
             unsigned char r = img[y][index];
             unsigned char g = img[y][index + 1];
             unsigned char b = img[y][index + 2];
-            printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
+            if (x == 0)
+                printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
+            else 
+                printf("  \x1b[48;2;%d;%d;%dm ", r, g, b);
+            if (x == meta.width - 1)
+                printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
             index += 3;
         }
         printf("\x1b[0m\n");
         index = 0;
     }
-
+    free(buff);
+    free(data);
+    free(uncompressed);
+    free(img);
     /*for (int i = 1; i <= meta.width*meta.height; i++)
     {
         if (meta.color_type == 2 && meta.bit_depth == 8)
