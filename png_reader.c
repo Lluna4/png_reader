@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
-#include "yet_another_chat/lib/user.h"
 
 int startswith(char *buf, char *str)
 {
@@ -44,13 +43,6 @@ unsigned char decode_ubyte(char **src)
     return x;
 }
 
-unsigned char *m_concat(unsigned char *src, unsigned char *concat, size_t size, size_t buffer_size)
-{
-    src = realloc(src, buffer_size + size + 1);
-    memcpy(&src[size], concat, buffer_size);
-    return src;
-}
-
 struct metadata
 {
     int width;
@@ -70,27 +62,80 @@ struct color_alpha
     int alpha;
 };
 
+unsigned char **convert_2d(unsigned char *data, struct metadata meta)
+{
+    unsigned char **ret = (unsigned char **)calloc(meta.height, sizeof(char *));
+    int index = 0;
+    for (int y = 0; y < meta.height- 1;y++)
+    {
+        ret[y] = (unsigned char *)calloc((meta.width * 3) + 1, sizeof(char));
+        for (int x = 0; x < (meta.width * 3) + 1; x++)
+        {
+            ret[y][x] = data[index];
+            index++;
+        }
+    }
+    return ret;
+}
+
+unsigned char *filter_scanline(unsigned char **scanline, int index, int width)
+{
+    unsigned char filter = scanline[index][0];
+    unsigned char *unfiltered = calloc(width * 3, sizeof(char));
+    switch (filter) 
+    {
+        case 0:
+            for (int x = 1; x < width * 3;x++)
+            {
+                unfiltered[x-1] = scanline[index][x];
+            }
+            break;
+        case 1:
+            for (int x = 1; x < width * 3;x++)
+            {
+                int x_trad = x - 1;
+                if (x <= 3)
+                    unfiltered[x_trad] = scanline[index][x];
+                else
+                    unfiltered[x_trad] = scanline[index][x] + unfiltered[x_trad - 3];
+            }
+            break;
+        case 2:
+            for (int x = 1; x < width * 3;x++)
+            {
+                int x_trad = x - 1;
+                if (index == 0)
+                    unfiltered[x_trad] = scanline[index][x];
+                else
+                    unfiltered[x_trad] = scanline[index][x] + scanline[index-1][x_trad];
+            }
+            break;
+    }
+    return unfiltered;
+}
 
 int main()
 {
-    FILE *a = fopen("k.png", "rb");
+    unsigned char magic[9] = {137, 80, 78, 71, 13, 10, 26, 10};
+    FILE *a = fopen("kk.png", "rb");
     char header[13] = {0};
     char *buffer;
     struct metadata meta = {0};
     fread(header, 4, 2, a);
+    if (memcmp(header, magic, 8) != 0)
+    {
+        printf("File is not a png\n");
+        return -1;
+    }
 
     fseek(a, 0, SEEK_END);
     long size = ftell(a);
     fseek(a, 0, SEEK_SET);
     buffer = malloc(size + 1);
     fread(buffer, 1, size, a);
+    unsigned long total_lenght = 0;
+    char *data = calloc(size, sizeof(char));
     buffer += 8;
-    struct color_alpha *cols = calloc(size, sizeof(struct color_alpha));
-    int color_index = 0;
-    unsigned char *data = calloc(10, sizeof(char));
-    unsigned char *data_ptr = data;
-    int color_lenght = 0;
-    unsigned long total_lenght = 10;
     while (1)
     {
         int lenght = decode_int(&buffer);
@@ -104,7 +149,7 @@ int main()
             char compression = decode_byte(&buffer);
             char filter = decode_byte(&buffer);
             char interface = decode_byte(&buffer);
-            printf("Image is %ix%i, color type %i, bit depth %i\n", width, height, color_type, bit_depth);
+            printf("Image is %ix%i, color type %i, bit depth %i filter %i\n", width, height, color_type, bit_depth, filter);
             struct metadata aa = {width, height, bit_depth, color_type, compression, filter, interface};
             meta = aa;
             buffer += 4;
@@ -114,11 +159,9 @@ int main()
         else if (startswith(buffer, "IDAT") == 1)
         {
             buffer += 4;
-            m_concat(data, (unsigned char *)buffer, total_lenght, lenght);
+            memcpy(&data[total_lenght], buffer, lenght);
             total_lenght += lenght;
             buffer += lenght + 4;
-            data_ptr += lenght;
-            
         }
         else if (startswith(buffer, "IEND"))
         {
@@ -132,10 +175,30 @@ int main()
             continue;
         }
     }
-    char *uncompressed = calloc(total_lenght, sizeof(char));
+    unsigned char *uncompressed = malloc((total_lenght + 1) * sizeof(char));
     unsigned long src_len = total_lenght;
     uncompress(uncompressed, &total_lenght, data, src_len);
-    printf("Uncompressed %i bytes\n", src_len);
+    unsigned char **img = convert_2d(uncompressed, meta);
+    
+    for (int y = 0; y < meta.height- 1;y++)
+    {   
+        img[y] = filter_scanline(img, y, meta.width);
+    }
+    int index = 0;
+    for (int y = 0; y < meta.height- 1;y++)
+    {
+        for (int x = 0; x < meta.width; x++)
+        {
+            unsigned char r = img[y][index];
+            unsigned char g = img[y][index + 1];
+            unsigned char b = img[y][index + 2];
+            printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
+            index += 3;
+        }
+        printf("\x1b[0m\n");
+        index = 0;
+    }
+
     /*for (int i = 1; i <= meta.width*meta.height; i++)
     {
         if (meta.color_type == 2 && meta.bit_depth == 8)
