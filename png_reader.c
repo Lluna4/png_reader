@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include <math.h>
 
 int startswith(char *buf, char *str)
 {
@@ -86,13 +87,13 @@ unsigned char *filter_scanline(unsigned char **scanline, int index, int width, i
     switch (filter)
     {
         case 0:
-            for (int x = 1; x < width * bpp;x++)
+            for (int x = 1; x < (width * bpp) + 1;x++)
             {
                 unfiltered[x-1] = scanline[index][x];
             }
             break;
         case 1:
-            for (int x = 1; x < width * bpp;x++)
+            for (int x = 1; x < (width * bpp) + 1;x++)
             {
                 int x_trad = x - 1;
                 if (x <= bpp)
@@ -102,13 +103,59 @@ unsigned char *filter_scanline(unsigned char **scanline, int index, int width, i
             }
             break;
         case 2:
-            for (int x = 1; x < width * bpp;x++)
+            for (int x = 1;x < (width * bpp) + 1;x++)
             {
                 int x_trad = x - 1;
                 if (index == 0)
                     unfiltered[x_trad] = scanline[index][x];
                 else
                     unfiltered[x_trad] = scanline[index][x] + scanline[index-1][x_trad];
+            }
+            break;
+        case 3:
+            for (int x = 1; x < (width * bpp) + 1; x++)
+            {
+                int x_trad = x - 1;
+                if (index == 0)
+                    unfiltered[x_trad] = scanline[index][x];
+                else
+                {
+                    int left = (x > bpp) ? unfiltered[x_trad - bpp] : 0;
+                    int up = scanline[index - 1][x_trad];
+                    unfiltered[x_trad] = scanline[index][x] + ((left + up) / 2);
+                }
+            }
+            break;
+        case 4:
+            for (int x = 1; x < (width * bpp) + 1; x++)
+            {
+                int x_trad = x - 1;
+                if (index == 0)
+                    unfiltered[x_trad] = scanline[index][x];
+                else
+                {
+                    int left = (x > bpp) ? unfiltered[x_trad - bpp] : 0;
+                    int up = scanline[index - 1][x_trad];
+                    int up_left = (x > bpp) ? scanline[index - 1][x_trad - bpp] : 0;
+                    
+                    int p = left + up - up_left;
+                    int pa = abs(p - left);
+                    int pb = abs(p - up);
+                    int pc = abs(p - up_left);
+                    
+                    if (pa <= pb && pa <= pc)
+                        unfiltered[x_trad] = scanline[index][x] + left;
+                    else if (pb <= pc)
+                        unfiltered[x_trad] = scanline[index][x] + up;
+                    else
+                        unfiltered[x_trad] = scanline[index][x] + up_left;
+                }
+            }
+            break;
+        default:
+            for (int x = 1; x < (width * bpp) + 1;x++)
+            {
+                unfiltered[x-1] = scanline[index][x];
             }
             break;
     }
@@ -214,9 +261,15 @@ int main(int argc, char *argv[])
             if (x == 0)
                 printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
             else
-                printf("  \x1b[48;2;%d;%d;%dm ", r, g, b);
-            if (x == meta.width - 1)
+            {
                 printf(" \x1b[48;2;%d;%d;%dm ", r, g, b);
+                //printf(" r: %i g: %i b: %i", r, g, b);
+            }
+            if (x == meta.width - 1)
+            {
+                printf(" \x1b[48;2;%d;%d;%dm ", r, g, b);
+                //printf(" r: %i g: %i b: %i", r, g, b);
+            }
             index += 3;
         }
         printf("\x1b[0m\n");
