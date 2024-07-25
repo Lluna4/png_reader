@@ -81,8 +81,9 @@ unsigned char **convert_2d(unsigned char *data, struct metadata meta)
 unsigned char *filter_scanline(unsigned char **scanline, int index, int width, int bpp)
 {
     unsigned char filter = scanline[index][0];
+    printf("Filter for %i is %i\n", index, filter);
     unsigned char *unfiltered = calloc(width * bpp, sizeof(char));
-    switch (filter) 
+    switch (filter)
     {
         case 0:
             for (int x = 1; x < width * bpp;x++)
@@ -94,7 +95,7 @@ unsigned char *filter_scanline(unsigned char **scanline, int index, int width, i
             for (int x = 1; x < width * bpp;x++)
             {
                 int x_trad = x - 1;
-                if (x <= 3)
+                if (x <= bpp)
                     unfiltered[x_trad] = scanline[index][x];
                 else
                     unfiltered[x_trad] = scanline[index][x] + unfiltered[x_trad - bpp];
@@ -114,10 +115,20 @@ unsigned char *filter_scanline(unsigned char **scanline, int index, int width, i
     return unfiltered;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     unsigned char magic[9] = {137, 80, 78, 71, 13, 10, 26, 10};
-    FILE *a = fopen("kk.png", "rb");
+    if (argc < 2)
+    {
+        printf("Not enough arguments!\n");
+        return -1;
+    }
+    FILE *a = fopen(argv[1], "rb");
+    if (a == NULL)
+    {
+        printf("File %s doesnt exist!\n", argv[1]);
+        return -1;
+    }
     char header[13] = {0};
     char *buff;
     struct metadata meta = {0};
@@ -169,7 +180,7 @@ int main()
             fclose(a);
             break;
         }
-        else 
+        else
         {
             buffer += lenght + 8;
             printf("skipped %i bytes\n", lenght + 8);
@@ -182,10 +193,15 @@ int main()
     unsigned long src_len = total_lenght;
     uncompress(uncompressed, &dest_len, (unsigned char *)data, total_lenght);
     unsigned char **img = convert_2d(uncompressed, meta);
-    
+    int bpp = 0;
+    if (meta.color_type == 2)
+        bpp = (3 * meta.bit_depth)/8;
+    else if (meta.color_type == 6)
+        bpp = (4 * meta.bit_depth)/8;
+
     for (int y = 0; y < meta.height;y++)
-    {   
-        img[y] = filter_scanline(img, y, meta.width, 3);
+    {
+        img[y] = filter_scanline(img, y, meta.width, bpp);
     }
     int index = 0;
     for (int y = 0; y < meta.height;y++)
@@ -197,10 +213,10 @@ int main()
             unsigned char b = img[y][index + 2];
             if (x == 0)
                 printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
-            else 
+            else
                 printf("  \x1b[48;2;%d;%d;%dm ", r, g, b);
             if (x == meta.width - 1)
-                printf("\x1b[48;2;%d;%d;%dm ", r, g, b);
+                printf(" \x1b[48;2;%d;%d;%dm ", r, g, b);
             index += 3;
         }
         printf("\x1b[0m\n");
@@ -217,7 +233,7 @@ int main()
             unsigned char r = decode_ubyte(&data);
             unsigned char g = decode_ubyte(&data);
             unsigned char b = decode_ubyte(&data);
-            
+
             struct colors col = {r, g, b};
             printf(" %s ", color_string(col, "."));
             if (i%meta.width == 0)
