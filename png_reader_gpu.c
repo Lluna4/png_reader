@@ -153,22 +153,24 @@ struct raw_pixel **diagonal_order(struct raw_pixel **img, struct metadata meta)
 
 struct raw_pixel *flatten(struct raw_pixel **img, struct metadata meta)
 {
-    struct raw_pixel *ret = calloc(meta.width * meta.height + 1, sizeof(struct raw_pixel));
+    struct raw_pixel *ret = malloc(meta.width * meta.height * sizeof(struct raw_pixel));
     int index = 0;
     for (int y = 0; y < meta.height;y++)
     {
-        for (int x = 0; x < (meta.width * 3) + 1; x++)
+        for (int x = 0; x < meta.width; x++)
         {
             ret[index] = img[y][x];
             index++;
         }
     }
+    return ret;
 }
 
 int main(int argc, char *argv[])
 {
     unsigned char magic[9] = {137, 80, 78, 71, 13, 10, 26, 10};
-    FILE *a = fopen("a.png", "rb");
+
+    FILE *a = fopen("1.png", "rb");
     if (a == NULL)
     {
         printf("File %s doesnt exist!\n", argv[1]);
@@ -253,7 +255,7 @@ int main(int argc, char *argv[])
         }
         printf("\n");
     }
-    struct raw_pixel *img_flat = flatten(img_diag, meta);
+    struct raw_pixel *img_flat = flatten(img, meta);
     struct raw_pixel *img_diag_flat = flatten(img_diag, meta);
     free(buff);
     free(data);
