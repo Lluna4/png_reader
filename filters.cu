@@ -1,85 +1,105 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+struct raw_pixel
+{
+    unsigned char *data;
+    unsigned char filter;
+    int x;
+    int y;
+};
 
-__global__ void filter_scanline(unsigned char *scanline, unsigned char *prev_scanline, unsigned char *unfiltered, int width, int bpp, int filter)
+__global__ void filter_scanline(struct raw_pixel **scanline, struct raw_pixel **prev_scanline, struct raw_pixel **unfiltered, int width, int bpp, int filter)
 {
     int x  = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
     
     int x_trad = x;
+    int pos_x = scanline[y][x].x;
+    int pos_y = scanline[y][x].y;
     switch (filter)
     {
         case 0:
-                unfiltered[x_trad] = scanline[x];
+                unfiltered[pos_y][pos_x] = scanline[y][x];
             break;
         case 1:
-            if (x <= bpp)
-                unfiltered[x_trad] = scanline[x];
+            if (pos_x < 1)
+                unfiltered[pos_y][pos_x] = scanline[y][x];
             else
-                unfiltered[x_trad] = scanline[x] + unfiltered[x_trad - bpp];
+                for (int i = 0; i < bpp; i++)
+                {
+                    unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + unfiltered[pos_y][pos_x - 1].data[i];
+                }
+                
             break;
         case 2:
-            if (prev_scanline)
-                unfiltered[x_trad] = scanline[x];
+            if (pos_y < 1)
+                unfiltered[pos_y][pos_x] = scanline[y][x];
             else
-                unfiltered[x_trad] = scanline[x] + prev_scanline[x_trad - 1];
+                for (int i = 0; i < bpp; i++)
+                {
+                    unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + prev_scanline[pos_y -1][pos_x].data[i];
+                }
             break;
         case 3:
-            if (prev_scanline)
-                unfiltered[x_trad] = scanline[x];
+            if (pos_y < 1)
+                unfiltered[pos_y][pos_x] = scanline[y][x];
             else
             {
-                int left = (x > bpp) ? unfiltered[x_trad - bpp] : 0;
-                int up = prev_scanline[x_trad];
-                unfiltered[x_trad] = scanline[x] + ((left + up) / 2);
+                raw_pixel left = (pos_x > 0) ? unfiltered[pos_y][pos_x -1] : (raw_pixel){0};
+                raw_pixel up = prev_scanline[pos_y - 1][pos_x];
+                
+                for (int i = 0; i < bpp; i++)
+                {
+                    unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + ((left.data[i] + up.data[i]) / 2);
+                }
             }
         break;
         case 4:
             
-            if (prev_scanline)
+            if (pos_y < 1)
                 unfiltered[x_trad] = scanline[x];
             else
             {
-                int left = (x > bpp) ? unfiltered[x_trad - bpp] : 0;
-                int up = prev_scanline[x_trad];
-                int up_left = (x > bpp) ? prev_scanline[x_trad - bpp] : 0;
+                raw_pixel left = (pos_x > 0) ? unfiltered[pos_y][pos_x -1] : (raw_pixel){0};
+                raw_pixel up = prev_scanline[pos_y - 1][pos_x];
+                raw_pixel up_left = (pos_x > 0) ? prev_scanline[pos_y - 1][pos_x - 1] : (raw_pixel){0};
                 
-                int p = left + up - up_left;
-                int pa = abs(p - left);
-                int pb = abs(p - up);
-                int pc = abs(p - up_left);
-                
-                if (pa <= pb && pa <= pc)
-                    unfiltered[x_trad] = scanline[x] + left;
-                else if (pb <= pc)
-                    unfiltered[x_trad] = scanline[x] + up;
-                else
-                    unfiltered[x_trad] = scanline[x] + up_left;
+                for (int i = 0; i < bpp; i++)
+                {
+                    int p = left.data[i] + up.data[i] - up_left.data[i];
+                    int pa = abs(p - left.data[i]);
+                    int pb = abs(p - up.data[i]);
+                    int pc = abs(p - up_left.data[i]);
+                    
+                    if (pa <= pb && pa <= pc)
+                        unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + left.data[i];
+                    else if (pb <= pc)
+                        unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + up.data[i];
+                    else
+                        unfiltered[pos_y][pos_x].data[i] = scanline[y][x].data[i] + up_left.data[i];
+                }
             }
             break;
         default:
-            unfiltered[x-1] = scanline[x];
+            unfiltered[pos_y][pos_x] = scanline[y][x];
             break;
     }
 }
 
-extern "C" unsigned char *wrapper_filter(unsigned char *scanline, unsigned char *prev_scanline, int width, int bpp, int filter)
+extern "C" raw_pixel *wrapper_filter(raw_pixel *whole_img, raw_pixel *diag_img,int width, int bpp,int height, int filter)
 {
-    unsigned char *unfiltered;
-    unsigned char *scanline2;
-    unsigned char *prev_scanline2;
-    unsigned char *ret = (unsigned char *)malloc(width * bpp + 2);
-    cudaMalloc(&unfiltered, width * bpp + 2);
-    cudaMalloc(&scanline2, width * bpp + 2);
-    cudaMalloc(&prev_scanline2, width * bpp + 2);
-
-    cudaMemcpy(scanline2, scanline, width * bpp + 1, cudaMemcpyHostToDevice);
-    cudaMemcpy(prev_scanline2, prev_scanline, width * bpp + 1, cudaMemcpyHostToDevice);
-    scanline2++;
-    prev_scanline2++;
-    filter_scanline<<<1, width * bpp>>>(scanline2, prev_scanline2, unfiltered, width, bpp, filter);
+    raw_pixel *unfiltered;
+    raw_pixel *whole_img2;
+    raw_pixel *diag_img2;
+    raw_pixel *ret = (raw_pixel *)malloc(height + 2 *sizeof(raw_pixel));
+    cudaMalloc(&whole_img2, (height * width + 1) * sizeof(raw_pixel));
+    cudaMalloc(&diag_img2, (height * width + 1) * sizeof(raw_pixel));
+    cudaMemcpy(whole_img2, whole_img, (height * width) * sizeof(raw_pixel), cudaMemcpyHostToDevice);
+    cudaMemcpy(diag_img2, diag_img, (height * width) * sizeof(raw_pixel), cudaMemcpyHostToDevice);
+    filter_scanline<<<height, width>>>(scanline2, prev_scanline2, unfiltered, width, bpp, filter);
     cudaDeviceSynchronize();
-    cudaMemcpy(ret, unfiltered, width * bpp, cudaMemcpyDeviceToHost);
+    cudaMemcpy(ret, unfiltered, width * bpp + 1, cudaMemcpyDeviceToHost);
     cudaFree(unfiltered);
     cudaFree(scanline2);
     cudaFree(prev_scanline2);

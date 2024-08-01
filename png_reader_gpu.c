@@ -3,9 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
-#include <math.h>
 
-extern unsigned char *wrapper_filter(unsigned char *scanline, unsigned char *prev_scanline, int width, int bpp, int filter);
+
 
 int startswith(char *buf, char *str)
 {
@@ -46,6 +45,14 @@ unsigned char decode_ubyte(char **src)
     return x;
 }
 
+struct raw_pixel
+{
+    unsigned char *data;
+    unsigned char filter;
+    int x;
+    int y;
+};
+
 struct metadata
 {
     int width;
@@ -65,6 +72,8 @@ struct color_alpha
     int alpha;
 };
 
+extern struct raw_pixel *wrapper_filter(struct raw_pixel *whole_img, struct raw_pixel *diag_img,int width, int bpp,int height, int filter);
+
 unsigned char **convert_2d(unsigned char *data, struct metadata meta)
 {
     unsigned char **ret = (unsigned char **)calloc(meta.height, sizeof(char *));
@@ -81,16 +90,85 @@ unsigned char **convert_2d(unsigned char *data, struct metadata meta)
     return ret;
 }
 
+struct raw_pixel **convert_to_raw_pixel(unsigned char **img, struct metadata meta, int bpp)
+{
+    struct raw_pixel **ret = calloc(meta.height, sizeof(struct raw_pixel *));
+    for (int y = 0; y < meta.height;y++)
+    {
+        ret[y] = calloc(meta.width, sizeof(struct raw_pixel));
+        unsigned char filter = img[y][0];
+        img[y]++;
+        for (int x = 0; x < meta.width; x++)
+        {
+            struct raw_pixel new;
+            new.data = malloc(bpp * sizeof(unsigned char) + 1);
+            memcpy(new.data, img[y], bpp);
+            new.filter = filter;
+            new.x = x;
+            new.y = y;
+            ret[y][x] = new;
+            img[y] += bpp;
+        }
+    }
+    return ret;
+}
+
+struct raw_pixel **diagonal_order(struct raw_pixel **img, struct metadata meta)
+{
+    int y = 0;
+    int total_diagonals = meta.height + meta.width - 1;
+    struct raw_pixel **ret = calloc(total_diagonals, sizeof(struct raw_pixel *));
+    int max_y = meta.height - 1;
+    int init_x = 0;
+    int img_y = 0;
+    
+    while (y < total_diagonals)
+    {
+        ret[y] = calloc(meta.width, sizeof(struct raw_pixel));
+        
+        int init_y = img_y;
+        int img_x = init_x;
+        int x = 0;
+        
+        while (init_y >= 0 && img_x < meta.width)
+        {
+            ret[y][x] = img[init_y][img_x];
+            init_y--;
+            img_x++;
+            x++;
+        }
+        
+        if (img_y == max_y)
+        {
+            init_x++;
+        }
+        else 
+        {
+            img_y++;
+        }
+        y++;
+    }
+    return ret;
+}
+
+struct raw_pixel *flatten(struct raw_pixel **img, struct metadata meta)
+{
+    struct raw_pixel *ret = calloc(meta.width * meta.height + 1, sizeof(struct raw_pixel));
+    int index = 0;
+    for (int y = 0; y < meta.height;y++)
+    {
+        for (int x = 0; x < (meta.width * 3) + 1; x++)
+        {
+            ret[index] = img[y][x];
+            index++;
+        }
+    }
+}
 
 int main(int argc, char *argv[])
 {
     unsigned char magic[9] = {137, 80, 78, 71, 13, 10, 26, 10};
-    if (argc < 2)
-    {
-        printf("Not enough arguments!\n");
-        return -1;
-    }
-    FILE *a = fopen(argv[1], "rb");
+    FILE *a = fopen("a.png", "rb");
     if (a == NULL)
     {
         printf("File %s doesnt exist!\n", argv[1]);
@@ -159,13 +237,30 @@ int main(int argc, char *argv[])
     unsigned char *uncompressed = malloc(dest_len);
     unsigned long src_len = total_lenght;
     uncompress(uncompressed, &dest_len, (unsigned char *)data, total_lenght);
-    unsigned char **img = convert_2d(uncompressed, meta);
+    unsigned char **raw_img = convert_2d(uncompressed, meta);
     int bpp = 0;
     if (meta.color_type == 2)
         bpp = (3 * meta.bit_depth)/8;
     else if (meta.color_type == 6)
         bpp = (4 * meta.bit_depth)/8;
-
+    struct raw_pixel **img = convert_to_raw_pixel(raw_img, meta,bpp);
+    struct raw_pixel **img_diag = diagonal_order(img, meta);
+    for (int y = 0; y < meta.height + meta.width - 1;y++)
+    {
+        for (int x = 0; x < meta.width; x++)
+        {
+            printf(" Pixel poition %i,%i ", img_diag[y][x].y, img_diag[y][x].x);
+        }
+        printf("\n");
+    }
+    struct raw_pixel *img_flat = flatten(img_diag, meta);
+    struct raw_pixel *img_diag_flat = flatten(img_diag, meta);
+    free(buff);
+    free(data);
+    free(uncompressed);
+    free(raw_img);
+    free(img);
+    /* 
     for (int y = 0; y < meta.height;y++)
     {
         printf("Filter %i\n", img[y][0]);
@@ -202,7 +297,7 @@ int main(int argc, char *argv[])
     free(buff);
     free(data);
     free(uncompressed);
-    free(img);
+    free(img);*/
     /*for (int i = 1; i <= meta.width*meta.height; i++)
     {
         if (meta.color_type == 2 && meta.bit_depth == 8)
